@@ -2,7 +2,7 @@
   "env": "qa",
   "baseUrl": "https://techassignments.imsindia.com/",
   "browser": "chromium",
-  "headless": false,
+  "headless": true,
   "actionTimeout": 15000,
   "navigationTimeout": 30000,
   "retries": 1,

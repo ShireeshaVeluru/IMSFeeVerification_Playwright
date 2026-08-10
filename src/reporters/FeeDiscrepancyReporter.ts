@@ -7,7 +7,6 @@ import type {
 
 import fs from 'fs';
 import path from 'path';
-
 import { FrameworkConstants } from '../constants/FrameworkConstants';
 
 interface FeeComparison {
@@ -24,6 +23,7 @@ interface ReportRow {
     title: string;
     status: TestResult['status'];
     durationMs: number;
+
     category:
         | 'Passed'
         | 'Fee Discrepancy'
@@ -31,44 +31,56 @@ interface ReportRow {
         | 'Skipped';
 
     comparison?: FeeComparison;
+
     errorMessage?: string;
+
     screenshotPath?: string;
 }
 
-/**
- * Custom Playwright reporter for IMS Fee Verification.
- *
- * Responsibilities:
- *
- * 1. Collect test execution results.
- * 2. Identify Fee Discrepancies separately from Automation Defects.
- * 3. Display expected and displayed fees.
- * 4. Attach failure screenshots to the report.
- * 5. Generate one stakeholder-friendly HTML report.
- *
- * The report is regenerated after every execution.
- */
-export default class FeeDiscrepancyReporter implements Reporter {
+export default class FeeDiscrepancyReporter
+    implements Reporter {
 
-    private rows: ReportRow[] = [];
+    /*
+     * IMPORTANT:
+     *
+     * Map is used instead of an array so that the same
+     * testcase is stored only once.
+     *
+     * If Playwright retries a failed testcase:
+     *
+     * Attempt 1 -> Failed
+     * Attempt 2 -> Failed
+     *
+     * test.id remains the same, so the second result
+     * replaces the first result.
+     *
+     * This prevents duplicate rows in the stakeholder report.
+     */
+    private rows = new Map<string, ReportRow>();
 
     /**
-     * Called by Playwright after every test finishes.
+     * Called by Playwright whenever a test attempt finishes.
      */
     onTestEnd(
         test: TestCase,
         result: TestResult
     ): void {
 
-        // ---------------------------------------------------------
-        // Get fee comparison attachment
-        // ---------------------------------------------------------
+        /*
+         * ---------------------------------------------
+         * Fee comparison attachment
+         * ---------------------------------------------
+         */
 
-        const attachment = result.attachments.find(
-            a => a.name === 'fee-comparison'
-        );
+        const attachment =
+            result.attachments.find(
+                attachment =>
+                    attachment.name === 'fee-comparison'
+            );
 
-        let comparison: FeeComparison | undefined;
+        let comparison:
+            | FeeComparison
+            | undefined;
 
         if (attachment?.body) {
 
@@ -84,19 +96,29 @@ export default class FeeDiscrepancyReporter implements Reporter {
             }
         }
 
-        // ---------------------------------------------------------
-        // Find screenshot attachment
-        // ---------------------------------------------------------
+        /*
+         * ---------------------------------------------
+         * Screenshot
+         * ---------------------------------------------
+         */
 
-        const screenshot = result.attachments.find(
-            a => a.contentType === 'image/png'
-        );
+        const screenshot =
+            result.attachments.find(
+                attachment =>
+                    attachment.contentType === 'image/png'
+            );
 
-        // ---------------------------------------------------------
-        // Determine test category
-        // ---------------------------------------------------------
+        /*
+         * ---------------------------------------------
+         * Determine report category
+         * ---------------------------------------------
+         */
 
-        let category: ReportRow['category'] = 'Passed';
+        let category:
+            | 'Passed'
+            | 'Fee Discrepancy'
+            | 'Automation Defect'
+            | 'Skipped';
 
         if (result.status === 'passed') {
 
@@ -109,112 +131,100 @@ export default class FeeDiscrepancyReporter implements Reporter {
         } else {
 
             /*
-             * If fee comparison exists and expected/displayed
-             * values are different, it is a genuine product
-             * fee discrepancy.
+             * A failed test is considered a Fee Discrepancy
+             * when the fee comparison exists and the expected
+             * and displayed values are different.
              *
-             * Otherwise it is considered an automation defect.
+             * Otherwise it is considered an Automation Defect.
              */
 
-            const isAssertionFailure =
-                result.error?.message?.includes('Fee mismatch') ||
+            const isFeeMismatch =
+                result.error?.message?.includes(
+                    'Fee mismatch'
+                ) ||
                 (
-                    comparison &&
+                    comparison !== undefined &&
                     comparison.expectedFee !==
-                        comparison.displayedFee
+                    comparison.displayedFee
                 );
 
-            category = isAssertionFailure
+            category = isFeeMismatch
                 ? 'Fee Discrepancy'
                 : 'Automation Defect';
         }
 
-        // ---------------------------------------------------------
-        // Clean test title
-        // ---------------------------------------------------------
-
         /*
-         * Original title:
+         * ---------------------------------------------
+         * Clean test title
+         * ---------------------------------------------
          *
-         * [SimCAT Max 2025] IMS Batch 1
-         * — displayed fee matches expected fee
-         *
-         * Required title:
-         *
-         * [SimCAT Max 2025] IMS Batch 1
+         * Removes Playwright's project/parameter suffixes
+         * when they appear in the title.
          */
 
-        const cleanTitle = test.title
-            .split('—')[0]
-            .trim();
+        const cleanTitle =
+            cleanTestTitle(test.title);
 
-        // ---------------------------------------------------------
-        // Create clean error/detail message
-        // ---------------------------------------------------------
+        /*
+         * ---------------------------------------------
+         * Clean error message
+         * ---------------------------------------------
+         */
 
-        let cleanErrorMessage = '';
-
-        if (
-            category === 'Fee Discrepancy' &&
-            comparison
-        ) {
-
-            /*
-             * Do NOT display the raw Playwright assertion.
-             *
-             * Instead create a business-friendly message.
-             */
-
-            cleanErrorMessage =
-                `Fee mismatch | ` +
-                `Program: ${comparison.program} | ` +
-                `Batch: ${comparison.batch} | ` +
-                `Expected: ₹${comparison.expectedFee} | ` +
-                `Displayed: ₹${comparison.displayedFee}`;
-
-        } else if (result.error?.message) {
-
-            /*
-             * Automation failures should display a cleaned
-             * Playwright error.
-             */
-
-            cleanErrorMessage =
-                cleanPlaywrightError(
+        const errorMessage =
+            result.error?.message
+                ? cleanErrorMessage(
                     result.error.message
-                );
-        }
+                )
+                : undefined;
 
-        // ---------------------------------------------------------
-        // Store result
-        // ---------------------------------------------------------
+        /*
+         * ---------------------------------------------
+         * Store result
+         * ---------------------------------------------
+         *
+         * IMPORTANT:
+         *
+         * test.id is used as the Map key.
+         *
+         * This means retries do NOT create duplicate
+         * rows in the final stakeholder report.
+         */
 
-        this.rows.push({
+        this.rows.set(
+            test.id,
+            {
+                title: cleanTitle,
 
-            title: cleanTitle,
+                status: result.status,
 
-            status: result.status,
+                durationMs:
+                    result.duration,
 
-            durationMs: result.duration,
+                category,
 
-            category,
+                comparison,
 
-            comparison,
+                errorMessage,
 
-            errorMessage: cleanErrorMessage,
-
-            screenshotPath: screenshot?.path,
-        });
+                screenshotPath:
+                    screenshot?.path,
+            }
+        );
     }
 
     /**
-     * Called once after the complete test execution.
+     * Called once after the complete Playwright run.
      */
-    onEnd(_result: FullResult): void {
+    onEnd(
+        _result: FullResult
+    ): void {
 
-        // ---------------------------------------------------------
-        // Create report directory if it does not exist
-        // ---------------------------------------------------------
+        /*
+         * ---------------------------------------------
+         * Create report directory
+         * ---------------------------------------------
+         */
 
         if (
             !fs.existsSync(
@@ -230,26 +240,32 @@ export default class FeeDiscrepancyReporter implements Reporter {
             );
         }
 
-        // ---------------------------------------------------------
-        // Single report file
-        // ---------------------------------------------------------
-
         /*
-         * Every execution overwrites the same report.
+         * ---------------------------------------------
+         * Single report file
+         * ---------------------------------------------
          *
-         * Report:
-         *
-         * reports/IMS_Fee_Verification.html
+         * Every execution replaces the previous report.
          */
 
-        const outPath = path.join(
-            FrameworkConstants.REPORT_PATH,
-            'IMS_Fee_Verification.html'
-        );
+        const outPath =
+            path.join(
+                FrameworkConstants.REPORT_PATH,
+                'IMS_Fee_Verification.html'
+            );
 
-        // ---------------------------------------------------------
-        // Generate HTML
-        // ---------------------------------------------------------
+        /*
+         * Remove previous report if it exists.
+         */
+
+        if (fs.existsSync(outPath)) {
+
+            fs.unlinkSync(outPath);
+        }
+
+        /*
+         * Generate fresh report.
+         */
 
         fs.writeFileSync(
             outPath,
@@ -258,147 +274,191 @@ export default class FeeDiscrepancyReporter implements Reporter {
         );
 
         console.log(
-            `\nIMS Fee Verification report generated: ${outPath}\n`
+            `[FeeDiscrepancyReporter] Stakeholder report generated: ${outPath}`
         );
     }
 
     /**
-     * Generates complete stakeholder-facing HTML report.
+     * Creates the complete stakeholder HTML report.
      */
     private renderHtml(): string {
 
-        // ---------------------------------------------------------
-        // Categorize results
-        // ---------------------------------------------------------
+        /*
+         * Convert Map into array.
+         */
+
+        const rows =
+            Array.from(
+                this.rows.values()
+            );
+
+        /*
+         * ---------------------------------------------
+         * Categorize results
+         * ---------------------------------------------
+         */
 
         const discrepancies =
-            this.rows.filter(
-                r => r.category === 'Fee Discrepancy'
+            rows.filter(
+                row =>
+                    row.category ===
+                    'Fee Discrepancy'
             );
 
         const defects =
-            this.rows.filter(
-                r => r.category === 'Automation Defect'
+            rows.filter(
+                row =>
+                    row.category ===
+                    'Automation Defect'
             );
 
         const passed =
-            this.rows.filter(
-                r => r.category === 'Passed'
+            rows.filter(
+                row =>
+                    row.category ===
+                    'Passed'
             );
 
         const skipped =
-            this.rows.filter(
-                r => r.category === 'Skipped'
+            rows.filter(
+                row =>
+                    row.category ===
+                    'Skipped'
             );
 
-        // ---------------------------------------------------------
-        // Create table row
-        // ---------------------------------------------------------
+        /*
+         * ---------------------------------------------
+         * Summary
+         * ---------------------------------------------
+         */
 
-        const row = (r: ReportRow): string => {
+        const total =
+            rows.length;
 
-            const badgeClass =
-                r.category
+        /*
+         * ---------------------------------------------
+         * Generate table row
+         * ---------------------------------------------
+         */
+
+        const tableRow = (
+            row: ReportRow
+        ): string => {
+
+            const comparison =
+                row.comparison;
+
+            const categoryClass =
+                row.category
                     .toLowerCase()
                     .replace(/\s+/g, '-');
 
-            const c = r.comparison;
+            const action =
+                getAction(row.category);
 
-            // -----------------------------------------------------
-            // Screenshot HTML
-            // -----------------------------------------------------
-
-            let screenshotHtml = '—';
-
-            if (r.screenshotPath) {
-
-                /*
-                 * Convert screenshot path to a path relative
-                 * to the report directory.
-                 */
-
-                const reportDir =
-                    FrameworkConstants.REPORT_PATH;
-
-                let relativeScreenshot =
-                    path.relative(
-                        reportDir,
-                        r.screenshotPath
-                    );
-
-                /*
-                 * Convert Windows backslashes to forward
-                 * slashes for HTML.
-                 */
-
-                relativeScreenshot =
-                    relativeScreenshot.replace(
-                        /\\/g,
-                        '/'
-                    );
-
-                screenshotHtml = `
-                    <a
-                        href="${escapeHtml(relativeScreenshot)}"
-                        target="_blank"
-                    >
-                        <img
-                            class="screenshot"
-                            src="${escapeHtml(relativeScreenshot)}"
-                            alt="Failure Screenshot"
-                        />
-                    </a>
-                `;
-            }
-
-            // -----------------------------------------------------
-            // Return table row
-            // -----------------------------------------------------
+            const screenshotHtml =
+                row.screenshotPath
+                    ? this.createScreenshotHtml(
+                        row.screenshotPath
+                    )
+                    : '—';
 
             return `
-                <tr class="${badgeClass}">
+                <tr class="${categoryClass}">
 
                     <td class="test-name">
-                        ${escapeHtml(r.title)}
+                        ${escapeHtml(row.title)}
                     </td>
 
                     <td>
-                        <span class="badge ${badgeClass}">
-                            ${escapeHtml(r.category)}
+                        <span class="badge ${categoryClass}">
+                            ${escapeHtml(row.category)}
                         </span>
                     </td>
 
                     <td>
                         ${
-                            c
-                                ? escapeHtml(c.expectedFee)
-                                : '—'
-                        }
-                    </td>
-
-                    <td>
-                        ${
-                            c
-                                ? escapeHtml(c.displayedFee)
-                                : '—'
-                        }
-                    </td>
-
-                    <td>
-                        ${(r.durationMs / 1000).toFixed(1)}s
-                    </td>
-
-                    <td class="detail">
-                        ${
-                            r.errorMessage
+                            comparison
                                 ? escapeHtml(
-                                      r.errorMessage
-                                  )
+                                    comparison.expectedFee
+                                )
                                 : '—'
                         }
                     </td>
 
-                    <td class="screenshot-cell">
+                    <td
+                        class="${
+                            comparison &&
+                            comparison.expectedFee !==
+                            comparison.displayedFee
+                                ? 'fee-mismatch'
+                                : ''
+                        }"
+                    >
+                        ${
+                            comparison
+                                ? escapeHtml(
+                                    comparison.displayedFee
+                                )
+                                : '—'
+                        }
+                    </td>
+
+                    <td>
+                        ${
+                            comparison?.gst
+                                ? escapeHtml(
+                                    comparison.gst
+                                )
+                                : '—'
+                        }
+                    </td>
+
+                    <td>
+                        ${
+                            comparison?.startDate
+                                ? escapeHtml(
+                                    comparison.startDate
+                                )
+                                : '—'
+                        }
+                    </td>
+
+                    <td>
+                        ${
+                            comparison?.batchType
+                                ? escapeHtml(
+                                    comparison.batchType
+                                )
+                                : '—'
+                        }
+                    </td>
+
+                    <td>
+                        ${escapeHtml(action)}
+                    </td>
+
+                    <td class="duration">
+                        ${(
+                            row.durationMs / 1000
+                        ).toFixed(1)}s
+                    </td>
+
+                    <td class="details">
+                        ${
+                            row.errorMessage
+                                ? `
+                                    <div class="error-message">
+                                        ${escapeHtml(
+                                            row.errorMessage
+                                        )}
+                                    </div>
+                                  `
+                                : '—'
+                        }
+                    </td>
+
+                    <td class="screenshot">
                         ${screenshotHtml}
                     </td>
 
@@ -406,9 +466,87 @@ export default class FeeDiscrepancyReporter implements Reporter {
             `;
         };
 
-        // ---------------------------------------------------------
-        // HTML
-        // ---------------------------------------------------------
+        /*
+         * ---------------------------------------------
+         * Section renderer
+         * ---------------------------------------------
+         */
+
+        const renderSection = (
+            title: string,
+            sectionRows: ReportRow[],
+            cssClass: string
+        ): string => {
+
+            if (
+                sectionRows.length === 0
+            ) {
+
+                return '';
+            }
+
+            return `
+                <section>
+
+                    <h2 class="${cssClass}">
+                        ${title}
+                    </h2>
+
+                    <div class="table-container">
+
+                        <table>
+
+                            <thead>
+
+                                <tr>
+
+                                    <th>Test</th>
+
+                                    <th>Category</th>
+
+                                    <th>Expected Fee</th>
+
+                                    <th>Displayed Fee</th>
+
+                                    <th>GST</th>
+
+                                    <th>Start Date</th>
+
+                                    <th>Batch Type</th>
+
+                                    <th>Action</th>
+
+                                    <th>Duration</th>
+
+                                    <th>Details</th>
+
+                                    <th>Screenshot</th>
+
+                                </tr>
+
+                            </thead>
+
+                            <tbody>
+
+                                ${sectionRows
+                                    .map(tableRow)
+                                    .join('')}
+
+                            </tbody>
+
+                        </table>
+
+                    </div>
+
+                </section>
+            `;
+        };
+
+        /*
+         * ---------------------------------------------
+         * Final HTML
+         * ---------------------------------------------
+         */
 
         return `
 <!DOCTYPE html>
@@ -425,7 +563,7 @@ export default class FeeDiscrepancyReporter implements Reporter {
     >
 
     <title>
-        IMS Program Fee Verification — Execution Report
+        IMS Fee Verification Stakeholder Report
     </title>
 
     <style>
@@ -447,57 +585,71 @@ export default class FeeDiscrepancyReporter implements Reporter {
 
             background: #f5f7fa;
 
-            color: #172b4d;
+            color: #263238;
         }
 
-        h1 {
+        .header {
 
-            margin-bottom: 5px;
+            background: #ffffff;
 
-            font-size: 28px;
+            border-radius: 10px;
+
+            padding: 25px;
+
+            margin-bottom: 25px;
+
+            box-shadow:
+                0 2px 8px
+                rgba(0,0,0,0.08);
         }
 
-        .generated {
+        .header h1 {
 
-            color: #6b778c;
+            margin: 0 0 8px 0;
 
-            margin-bottom: 30px;
-
-            font-size: 14px;
+            font-size: 26px;
         }
 
-        /* -------------------------------------------------------
-           Summary Cards
-        ------------------------------------------------------- */
+        .header p {
+
+            margin: 5px 0;
+
+            color: #607d8b;
+        }
 
         .summary {
 
             display: grid;
 
             grid-template-columns:
-                repeat(4, 1fr);
+                repeat(
+                    auto-fit,
+                    minmax(180px, 1fr)
+                );
 
-            gap: 20px;
+            gap: 15px;
 
-            margin-bottom: 40px;
+            margin-bottom: 30px;
         }
 
         .card {
 
-            background: white;
+            background: #ffffff;
 
             border-radius: 10px;
 
-            padding: 25px;
+            padding: 20px;
+
+            text-align: center;
 
             box-shadow:
                 0 2px 8px
-                rgba(0, 0, 0, 0.08);
+                rgba(0,0,0,0.08);
         }
 
         .card .num {
 
-            font-size: 34px;
+            font-size: 32px;
 
             font-weight: bold;
 
@@ -508,254 +660,259 @@ export default class FeeDiscrepancyReporter implements Reporter {
 
             font-size: 14px;
 
-            color: #6b778c;
+            color: #607d8b;
+        }
 
-            text-transform: uppercase;
+        .card.total .num {
+
+            color: #1565c0;
         }
 
         .card.passed .num {
 
-            color: #00875a;
+            color: #2e7d32;
         }
 
         .card.discrepancy .num {
 
-            color: #de350b;
+            color: #d84315;
         }
 
         .card.defect .num {
 
-            color: #ff8b00;
+            color: #6a1b9a;
         }
 
         .card.skipped .num {
 
-            color: #6554c0;
+            color: #757575;
         }
-
-        /* -------------------------------------------------------
-           Sections
-        ------------------------------------------------------- */
 
         section {
 
-            margin-bottom: 40px;
+            background: #ffffff;
+
+            border-radius: 10px;
+
+            padding: 20px;
+
+            margin-bottom: 25px;
+
+            box-shadow:
+                0 2px 8px
+                rgba(0,0,0,0.08);
         }
 
-        section h2 {
+        h2 {
 
-            font-size: 22px;
+            margin-top: 0;
 
-            margin-bottom: 15px;
+            font-size: 20px;
         }
 
-        /* -------------------------------------------------------
-           Table
-        ------------------------------------------------------- */
+        h2.discrepancy {
+
+            color: #d84315;
+        }
+
+        h2.defect {
+
+            color: #6a1b9a;
+        }
+
+        h2.passed {
+
+            color: #2e7d32;
+        }
+
+        h2.skipped {
+
+            color: #757575;
+        }
+
+        .table-container {
+
+            overflow-x: auto;
+
+            width: 100%;
+        }
 
         table {
 
             width: 100%;
 
-            border-collapse: separate;
+            border-collapse: collapse;
 
-            border-spacing: 0;
-
-            background: white;
-
-            border-radius: 10px;
-
-            overflow: hidden;
-
-            box-shadow:
-                0 2px 8px
-                rgba(0, 0, 0, 0.08);
+            min-width: 1200px;
         }
 
         th {
 
-            background: #f1f3f5;
+            background: #263238;
 
-            color: #5e6c84;
+            color: #ffffff;
 
-            text-transform: uppercase;
-
-            font-size: 12px;
-
-            letter-spacing: 0.5px;
-
-            padding: 15px;
+            padding: 12px;
 
             text-align: left;
+
+            font-size: 13px;
+
+            white-space: nowrap;
         }
 
         td {
 
-            padding: 18px 15px;
+            padding: 12px;
 
-            border-top: 1px solid #edf0f2;
+            border-bottom:
+                1px solid #e0e0e0;
 
             vertical-align: top;
 
-            font-size: 14px;
+            font-size: 13px;
         }
 
-        /* -------------------------------------------------------
-           Test Name
-        ------------------------------------------------------- */
+        tr:hover {
+
+            background: #f8f9fa;
+        }
 
         .test-name {
 
-            min-width: 220px;
+            font-weight: 600;
 
-            max-width: 300px;
+            min-width: 250px;
 
-            font-weight: 500;
-
-            line-height: 1.5;
+            max-width: 350px;
         }
-
-        /* -------------------------------------------------------
-           Detail
-        ------------------------------------------------------- */
-
-        .detail {
-
-            min-width: 450px;
-
-            max-width: 700px;
-
-            white-space: normal;
-
-            word-break: break-word;
-
-            line-height: 1.6;
-
-            color: #344563;
-        }
-
-        /* -------------------------------------------------------
-           Category badges
-        ------------------------------------------------------- */
 
         .badge {
 
             display: inline-block;
 
-            padding: 6px 10px;
+            padding: 5px 10px;
 
-            border-radius: 20px;
+            border-radius: 15px;
 
             font-size: 12px;
 
             font-weight: bold;
+
+            white-space: nowrap;
         }
 
         .badge.passed {
 
-            background: #d9f7e8;
+            background: #e8f5e9;
 
-            color: #00875a;
+            color: #2e7d32;
         }
 
         .badge.fee-discrepancy {
 
-            background: #ffebe6;
+            background: #fbe9e7;
 
-            color: #de350b;
+            color: #d84315;
         }
 
         .badge.automation-defect {
 
-            background: #fff0b3;
+            background: #f3e5f5;
 
-            color: #974f00;
+            color: #6a1b9a;
         }
 
         .badge.skipped {
 
-            background: #eae6ff;
+            background: #eeeeee;
 
-            color: #403294;
+            color: #616161;
         }
 
-        /* -------------------------------------------------------
-           Screenshot
-        ------------------------------------------------------- */
+        .fee-mismatch {
 
-        .screenshot-cell {
+            font-weight: bold;
 
-            width: 220px;
+            color: #d84315;
 
-            text-align: center;
+            background: #fff3e0;
+        }
 
-            vertical-align: middle;
+        .duration {
+
+            white-space: nowrap;
+        }
+
+        .details {
+
+            max-width: 400px;
+
+            min-width: 300px;
+
+            white-space: normal;
+
+            word-break: break-word;
+        }
+
+        .error-message {
+
+            white-space: pre-wrap;
+
+            line-height: 1.5;
+
+            color: #b71c1c;
+
+            background: #ffebee;
+
+            border-radius: 5px;
+
+            padding: 10px;
         }
 
         .screenshot {
 
-            width: 180px;
+            min-width: 180px;
 
-            max-height: 120px;
+            text-align: center;
+        }
 
-            object-fit: contain;
+        .screenshot img {
 
-            border: 1px solid #dfe1e6;
+            max-width: 160px;
 
-            border-radius: 6px;
+            max-height: 100px;
+
+            border-radius: 5px;
+
+            border: 1px solid #ddd;
 
             cursor: pointer;
-
-            transition:
-                transform 0.2s ease,
-                box-shadow 0.2s ease;
         }
 
-        .screenshot:hover {
+        .screenshot img:hover {
 
-            transform: scale(1.05);
-
-            box-shadow:
-                0 4px 12px
-                rgba(0, 0, 0, 0.2);
+            opacity: 0.8;
         }
 
-        /* -------------------------------------------------------
-           Responsive
-        ------------------------------------------------------- */
+        .no-results {
 
-        @media (max-width: 1200px) {
+            padding: 15px;
 
-            .summary {
+            color: #607d8b;
 
-                grid-template-columns:
-                    repeat(2, 1fr);
-            }
-
-            table {
-
-                display: block;
-
-                overflow-x: auto;
-            }
+            text-align: center;
         }
 
-        @media (max-width: 700px) {
+        .footer {
 
-            body {
+            text-align: center;
 
-                padding: 15px;
-            }
+            color: #90a4ae;
 
-            .summary {
+            font-size: 12px;
 
-                grid-template-columns: 1fr;
-            }
-
-            h1 {
-
-                font-size: 22px;
-            }
+            margin-top: 30px;
         }
 
     </style>
@@ -764,22 +921,36 @@ export default class FeeDiscrepancyReporter implements Reporter {
 
 <body>
 
-    <h1>
-        IMS Program Fee Verification — Execution Report
-    </h1>
+    <div class="header">
 
-    <div class="generated">
+        <h1>
+            IMS Fee Verification Report
+        </h1>
 
-        Generated:
-        ${new Date().toLocaleString()}
+        <p>
+            Stakeholder-focused execution summary
+        </p>
+
+        <p>
+            Generated:
+            ${new Date().toLocaleString()}
+        </p>
 
     </div>
 
-    <!-- =======================================================
-         SUMMARY
-    ======================================================== -->
-
     <div class="summary">
+
+        <div class="card total">
+
+            <div class="num">
+                ${total}
+            </div>
+
+            <div class="label">
+                Total Tests
+            </div>
+
+        </div>
 
         <div class="card passed">
 
@@ -793,7 +964,6 @@ export default class FeeDiscrepancyReporter implements Reporter {
 
         </div>
 
-
         <div class="card discrepancy">
 
             <div class="num">
@@ -806,7 +976,6 @@ export default class FeeDiscrepancyReporter implements Reporter {
 
         </div>
 
-
         <div class="card defect">
 
             <div class="num">
@@ -818,7 +987,6 @@ export default class FeeDiscrepancyReporter implements Reporter {
             </div>
 
         </div>
-
 
         <div class="card skipped">
 
@@ -834,273 +1002,189 @@ export default class FeeDiscrepancyReporter implements Reporter {
 
     </div>
 
-
-    <!-- =======================================================
-         FEE DISCREPANCIES
-    ======================================================== -->
-
-    ${
-        discrepancies.length > 0
-            ? `
-
-    <section>
-
-        <h2>
-            ⚠ Fee Discrepancies
-        </h2>
-
-        <table>
-
-            <thead>
-
-                <tr>
-
-                    <th>Test</th>
-
-                    <th>Category</th>
-
-                    <th>Expected Fee</th>
-
-                    <th>Displayed Fee</th>
-
-                    <th>Duration</th>
-
-                    <th>Detail</th>
-
-                    <th>Screenshot</th>
-
-                </tr>
-
-            </thead>
-
-            <tbody>
-
-                ${discrepancies.map(row).join('')}
-
-            </tbody>
-
-        </table>
-
-    </section>
-
-    `
-            : ''
-    }
-
-
-    <!-- =======================================================
-         AUTOMATION DEFECTS
-    ======================================================== -->
-
-    ${
-        defects.length > 0
-            ? `
-
-    <section>
-
-        <h2>
-            🛠 Automation Defects
-        </h2>
-
-        <table>
-
-            <thead>
-
-                <tr>
-
-                    <th>Test</th>
-
-                    <th>Category</th>
-
-                    <th>Expected Fee</th>
-
-                    <th>Displayed Fee</th>
-
-                    <th>Duration</th>
-
-                    <th>Detail</th>
-
-                    <th>Screenshot</th>
-
-                </tr>
-
-            </thead>
-
-            <tbody>
-
-                ${defects.map(row).join('')}
-
-            </tbody>
-
-        </table>
-
-    </section>
-
-    `
-            : ''
-    }
-
-
-    <!-- =======================================================
-         PASSED
-    ======================================================== -->
-
-    ${
-        passed.length > 0
-            ? `
-
-    <section>
-
-        <h2>
-            ✔ Passed
-        </h2>
-
-        <table>
-
-            <thead>
-
-                <tr>
-
-                    <th>Test</th>
-
-                    <th>Category</th>
-
-                    <th>Expected Fee</th>
-
-                    <th>Displayed Fee</th>
-
-                    <th>Duration</th>
-
-                    <th>Detail</th>
-
-                    <th>Screenshot</th>
-
-                </tr>
-
-            </thead>
-
-            <tbody>
-
-                ${passed.map(row).join('')}
-
-            </tbody>
-
-        </table>
-
-    </section>
-
-    `
-            : ''
-    }
-
-
-    <!-- =======================================================
-         SKIPPED
-    ======================================================== -->
-
-    ${
-        skipped.length > 0
-            ? `
-
-    <section>
-
-        <h2>
-            ⏭ Skipped
-        </h2>
-
-        <table>
-
-            <thead>
-
-                <tr>
-
-                    <th>Test</th>
-
-                    <th>Category</th>
-
-                    <th>Expected Fee</th>
-
-                    <th>Displayed Fee</th>
-
-                    <th>Duration</th>
-
-                    <th>Detail</th>
-
-                    <th>Screenshot</th>
-
-                </tr>
-
-            </thead>
-
-            <tbody>
-
-                ${skipped.map(row).join('')}
-
-            </tbody>
-
-        </table>
-
-    </section>
-
-    `
-            : ''
-    }
+    ${renderSection(
+        '⚠ Fee Discrepancies — Product / Content Action Required',
+        discrepancies,
+        'discrepancy'
+    )}
+
+    ${renderSection(
+        '🛠 Automation Defects — QA / Automation Action Required',
+        defects,
+        'defect'
+    )}
+
+    ${renderSection(
+        '✔ Passed Tests',
+        passed,
+        'passed'
+    )}
+
+    ${renderSection(
+        '⏭ Skipped Tests',
+        skipped,
+        'skipped'
+    )}
+
+    <div class="footer">
+
+        IMS Fee Verification Automation Framework
+
+    </div>
 
 </body>
 
 </html>
         `;
     }
+
+    /**
+     * Creates screenshot HTML.
+     *
+     * The screenshot is embedded as Base64 so the stakeholder
+     * report remains viewable even when the screenshot file
+     * itself is not directly available.
+     */
+    private createScreenshotHtml(
+        screenshotPath: string
+    ): string {
+
+        try {
+
+            if (
+                !fs.existsSync(
+                    screenshotPath
+                )
+            ) {
+
+                return 'Screenshot unavailable';
+            }
+
+            const image =
+                fs.readFileSync(
+                    screenshotPath
+                );
+
+            const base64 =
+                image.toString('base64');
+
+            return `
+                <a
+                    href="data:image/png;base64,${base64}"
+                    target="_blank"
+                    title="Open screenshot"
+                >
+
+                    <img
+                        src="data:image/png;base64,${base64}"
+                        alt="Failure screenshot"
+                    >
+
+                </a>
+            `;
+
+        } catch {
+
+            return 'Screenshot unavailable';
+        }
+    }
 }
 
-
 /**
- * Removes Playwright ANSI/control characters and unnecessary
- * framework information from an error message.
+ * Removes unnecessary Playwright title information.
  */
-function cleanPlaywrightError(
-    error: string
+function cleanTestTitle(
+    title: string
 ): string {
 
-    let cleaned = error;
-
-    // ---------------------------------------------------------
-    // Remove ANSI escape/control characters
-    // ---------------------------------------------------------
-
-    cleaned = cleaned.replace(
-        /[\u001B\u009B][[\]()#;?]*(?:(?:(?:[a-zA-Z\d]*(?:;[-a-zA-Z\d/#&.:=?%@~_]+)*)?\u0007)|(?:(?:\d{1,4}(?:[;:]\d{0,4})*)?[\dA-PR-TZcf-nq-uy=><~]))/g,
-        ''
-    );
-
-    // ---------------------------------------------------------
-    // Remove Playwright Call log
-    // ---------------------------------------------------------
-
-    cleaned =
-        cleaned.split('Call log:')[0];
-
-    // ---------------------------------------------------------
-    // Remove stack trace
-    // ---------------------------------------------------------
-
-    cleaned =
-        cleaned.split(/\n\s*at\s+/)[0];
-
-    // ---------------------------------------------------------
-    // Remove excessive whitespace
-    // ---------------------------------------------------------
-
-    cleaned =
-        cleaned.replace(/\s+/g, ' ').trim();
-
-    return cleaned;
+    return title
+        .replace(
+            /\s*›\s*.*$/,
+            ''
+        )
+        .trim();
 }
 
+/**
+ * Cleans Playwright error messages so the stakeholder
+ * report focuses on the useful failure information.
+ */
+function cleanErrorMessage(
+    message: string
+): string {
+
+    let cleaned = message;
+
+    /*
+     * Remove Playwright call log when present.
+     */
+
+    const callLogIndex =
+        cleaned.indexOf(
+            'Call log:'
+        );
+
+    if (
+        callLogIndex !== -1
+    ) {
+
+        cleaned =
+            cleaned.substring(
+                0,
+                callLogIndex
+            );
+    }
+
+    /*
+     * Remove excessive blank lines.
+     */
+
+    cleaned =
+        cleaned.replace(
+            /\n{3,}/g,
+            '\n\n'
+        );
+
+    /*
+     * Remove leading/trailing whitespace.
+     */
+
+    return cleaned.trim();
+}
 
 /**
- * Escape HTML characters to prevent broken HTML
- * and unsafe content inside the report.
+ * Determines who should take action.
+ */
+function getAction(
+    category: ReportRow['category']
+): string {
+
+    switch (category) {
+
+        case 'Fee Discrepancy':
+
+            return 'Product / Content Team';
+
+        case 'Automation Defect':
+
+            return 'QA / Automation Team';
+
+        case 'Passed':
+
+            return 'No Action';
+
+        case 'Skipped':
+
+            return 'Review if required';
+
+        default:
+
+            return 'Review';
+    }
+}
+
+/**
+ * Prevents HTML injection.
  */
 function escapeHtml(
     input: string

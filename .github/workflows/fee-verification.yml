@@ -1,0 +1,203 @@
+name: IMS Fee Verification Suite
+
+on:
+  pull_request:
+    branches:
+      - main
+
+  schedule:
+    - cron: '0 2 * * *'
+
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment'
+        required: true
+        default: 'qa'
+        type: choice
+        options:
+          - qa
+          - staging
+          - prod
+
+      browser:
+        description: 'Browser'
+        required: true
+        default: 'chromium'
+        type: choice
+        options:
+          - chromium
+          - firefox
+          - webkit
+
+jobs:
+  fee-verification:
+
+    runs-on: ubuntu-latest
+
+    timeout-minutes: 20
+
+    strategy:
+      fail-fast: false
+
+      matrix:
+        browser: ${{ github.event_name == 'schedule' && fromJSON('["chromium","firefox","webkit"]') || fromJSON(format('["{0}"]', github.event.inputs.browser || 'chromium')) }}
+
+    env:
+      ENV: ${{ github.event.inputs.environment || (github.event_name == 'schedule' && 'staging') || 'qa' }}
+
+    steps:
+
+      # ---------------------------------------------------
+      # 1. Checkout
+      # ---------------------------------------------------
+
+      - name: Checkout source code
+        uses: actions/checkout@v4
+
+      # ---------------------------------------------------
+      # 2. Setup Node.js
+      # ---------------------------------------------------
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # ---------------------------------------------------
+      # 3. Install dependencies
+      # ---------------------------------------------------
+
+      - name: Install dependencies
+        run: npm ci
+
+      # ---------------------------------------------------
+      # 4. Install Playwright browser
+      # ---------------------------------------------------
+
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+
+      # ---------------------------------------------------
+      # 5. Display execution information
+      # ---------------------------------------------------
+
+      - name: Display execution information
+        run: |
+          echo "=========================================="
+          echo "IMS Fee Verification Suite"
+          echo "=========================================="
+
+          echo "Environment : $ENV"
+          echo "Browser     : ${{ matrix.browser }}"
+          echo "Trigger     : ${{ github.event_name }}"
+          echo "Repository  : ${{ github.repository }}"
+          echo "Branch      : ${{ github.ref_name }}"
+          echo "Run Number  : ${{ github.run_number }}"
+          echo "Run ID      : ${{ github.run_id }}"
+
+          echo "=========================================="
+
+      # ---------------------------------------------------
+      # 6. Run Playwright Tests
+      # ---------------------------------------------------
+
+      - name: Run fee verification suite
+        id: fee-tests
+        continue-on-error: ${{ github.event_name == 'workflow_dispatch' }}
+        run: |
+          echo "=========================================="
+          echo "Starting Playwright execution"
+          echo "=========================================="
+
+          echo "Environment : $ENV"
+          echo "Browser     : ${{ matrix.browser }}"
+
+          npx playwright test --project=${{ matrix.browser }}
+
+        env:
+          ENV: ${{ env.ENV }}
+
+      # ---------------------------------------------------
+      # 7. Display Test Result
+      # ---------------------------------------------------
+
+      - name: Display test execution result
+        if: always()
+        run: |
+          echo "=========================================="
+          echo "Playwright execution completed"
+          echo "=========================================="
+
+          echo "Test step outcome    : ${{ steps.fee-tests.outcome }}"
+          echo "Test step conclusion : ${{ steps.fee-tests.conclusion }}"
+          echo "Environment          : $ENV"
+          echo "Browser              : ${{ matrix.browser }}"
+
+          echo "=========================================="
+
+      # ---------------------------------------------------
+      # 8. Display Generated Files
+      # ---------------------------------------------------
+
+      - name: Display generated reports and logs
+        if: always()
+        shell: bash
+        run: |
+          echo "=========================================="
+          echo "Generated files"
+          echo "=========================================="
+
+          echo ""
+          echo "Playwright Report:"
+          if [ -d "playwright-report" ]; then
+            find playwright-report -maxdepth 2 -type f
+          else
+            echo "No playwright-report directory"
+          fi
+
+          echo ""
+          echo "Reports:"
+          if [ -d "reports" ]; then
+            find reports -maxdepth 2 -type f
+          else
+            echo "No reports directory"
+          fi
+
+          echo ""
+          echo "Logs:"
+          if [ -d "logs" ]; then
+            find logs -maxdepth 2 -type f
+          else
+            echo "No logs directory"
+          fi
+
+          echo ""
+          echo "Test Results:"
+          if [ -d "test-results" ]; then
+            find test-results -maxdepth 3 -type f
+          else
+            echo "No test-results directory"
+          fi
+
+          echo "=========================================="
+
+      # ---------------------------------------------------
+      # 9. Upload Everything as ONE Artifact
+      # ---------------------------------------------------
+
+      - name: Upload complete test artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: IMS-Fee-Verification-${{ matrix.browser }}-${{ env.ENV }}
+
+          path: |
+            playwright-report/
+            reports/
+            logs/
+            test-results/
+
+          if-no-files-found: warn
+          retention-days: 30

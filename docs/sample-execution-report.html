@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>IMS Fee Verification — Execution Report (Sample)</title>
+<style>
+    body { font-family: 'Segoe UI', Arial, sans-serif; background: #f5f6f8; color: #1f2430; margin: 0; padding: 32px; }
+    h1 { font-size: 22px; margin-bottom: 4px; }
+    .subtitle { color: #6b7280; margin-bottom: 24px; font-size: 13px; }
+    .summary { display: flex; gap: 16px; margin-bottom: 28px; }
+    .card { flex: 1; background: #fff; border-radius: 8px; padding: 16px 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+    .card .num { font-size: 28px; font-weight: 700; }
+    .card .label { font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: .04em; }
+    .card.discrepancy .num { color: #b45309; }
+    .card.defect .num { color: #b91c1c; }
+    .card.passed .num { color: #15803d; }
+    table { width: 100%; border-collapse: collapse; background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.08); margin-bottom: 12px;}
+    th, td { padding: 10px 14px; text-align: left; font-size: 13px; border-bottom: 1px solid #eef0f3; }
+    th { background: #f0f2f5; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: #6b7280; }
+    .badge { padding: 3px 9px; border-radius: 12px; font-size: 11px; font-weight: 600; }
+    .badge.fee-discrepancy { background: #fef3c7; color: #92400e; }
+    .badge.automation-defect { background: #fee2e2; color: #991b1b; }
+    .badge.passed { background: #dcfce7; color: #166534; }
+    section { margin-bottom: 32px; }
+    section h2 { font-size: 15px; margin-bottom: 10px; }
+    .note { font-size: 12px; color: #6b7280; margin-top: -20px; margin-bottom: 24px; }
+</style>
+</head>
+<body>
+    <h1>IMS Program Fee Verification — Execution Report</h1>
+    <div class="subtitle">Generated 8/10/2026, 5:26:46 AM · Environment: staging · Browser: chromium</div>
+    <div class="note">Sample report — illustrates the reporter's output shape using representative results, since this environment cannot reach techassignments.imsindia.com.</div>
+
+    <div class="summary">
+        <div class="card passed"><div class="num">2</div><div class="label">Passed</div></div>
+        <div class="card discrepancy"><div class="num">1</div><div class="label">Fee Discrepancies</div></div>
+        <div class="card defect"><div class="num">1</div><div class="label">Automation Defects</div></div>
+    </div>
+
+    
+    <section>
+        <h2>⚠ Fee Discrepancies — action needed from Product/Content team</h2>
+        <table>
+            <tr><th>Test</th><th>Category</th><th>Expected Fee</th><th>Displayed Fee</th><th>Duration</th><th>Detail</th></tr>
+            
+            <tr class="fee-discrepancy">
+                <td>[SimCAT Core 2025] Test Batch 21 — displayed fee matches expected fee</td>
+                <td><span class="badge fee-discrepancy">Fee Discrepancy</span></td>
+                <td>75000</td>
+                <td>78500</td>
+                <td>4.0s</td>
+                <td>Fee mismatch | Program: SimCAT Core 2025 | Batch: Test Batch 21 | Displayed: 78500 | Expected: 75000</td>
+            </tr>
+        </table>
+    </section>
+
+    
+    <section>
+        <h2>🛠 Automation Defects — action needed from QA/Automation team</h2>
+        <table>
+            <tr><th>Test</th><th>Category</th><th>Expected Fee</th><th>Displayed Fee</th><th>Duration</th><th>Detail</th></tr>
+            
+            <tr class="automation-defect">
+                <td>[SimCAT Max 2025] IMS Batch 1 — displayed fee matches expected fee</td>
+                <td><span class="badge automation-defect">Automation Defect</span></td>
+                <td>—</td>
+                <td>—</td>
+                <td>15.0s</td>
+                <td>Timeout 15000ms exceeded waiting for locator(&quot;div.col-sm-4.row.form-check.mb-3.d-flex&quot;) to be visible</td>
+            </tr>
+        </table>
+    </section>
+
+    <section>
+        <h2>✔ Passed</h2>
+        <table>
+            <tr><th>Test</th><th>Category</th><th>Expected Fee</th><th>Displayed Fee</th><th>Duration</th><th>Detail</th></tr>
+            
+            <tr class="passed">
+                <td>[SimCAT Core 2025] batch cv — displayed fee matches expected fee</td>
+                <td><span class="badge passed">Passed</span></td>
+                <td>56000</td>
+                <td>56000</td>
+                <td>4.2s</td>
+                <td></td>
+            </tr>
+            <tr class="passed">
+                <td>[SimCAT Max 2025] CAT25E-Online-WD11 — displayed fee matches expected fee</td>
+                <td><span class="badge passed">Passed</span></td>
+                <td>300000</td>
+                <td>300000</td>
+                <td>4.5s</td>
+                <td></td>
+            </tr>
+        </table>
+    </section>
+
+</body>
+</html>

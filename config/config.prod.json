@@ -1,0 +1,11 @@
+{
+  "env": "prod",
+  "baseUrl": "https://www.imsindia.com/",
+  "browser": "chromium",
+  "headless": true,
+  "actionTimeout": 20000,
+  "navigationTimeout": 45000,
+  "retries": 2,
+  "workers": 2,
+  "testerName": "QA Automation"
+}

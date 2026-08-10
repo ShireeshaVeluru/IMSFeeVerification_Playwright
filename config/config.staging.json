@@ -1,0 +1,11 @@
+{
+  "env": "staging",
+  "baseUrl": "https://staging.imsindia.com/",
+  "browser": "chromium",
+  "headless": true,
+  "actionTimeout": 15000,
+  "navigationTimeout": 30000,
+  "retries": 1,
+  "workers": 4,
+  "testerName": "QA Automation"
+}

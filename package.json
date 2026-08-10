@@ -1,0 +1,23 @@
+{
+  "name": "ims-fee-verification-playwright",
+  "version": "1.0.0",
+  "description": "Program fee verification suite for the IMS platform (Playwright + TypeScript, Page Object Model)",
+  "scripts": {
+    "test": "playwright test",
+    "test:qa": "cross-env ENV=qa playwright test",
+    "test:staging": "cross-env ENV=staging playwright test",
+    "test:prod": "cross-env ENV=prod playwright test",
+    "test:headed": "playwright test --headed",
+    "report": "playwright show-report",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.47.0",
+    "@types/node": "^20.14.0",
+    "cross-env": "^7.0.3",
+    "typescript": "^5.5.0"
+  },
+  "dependencies": {
+    "xlsx": "^0.18.5"
+  }
+}

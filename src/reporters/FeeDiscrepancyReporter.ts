@@ -353,9 +353,6 @@ export default class FeeDiscrepancyReporter
                     .toLowerCase()
                     .replace(/\s+/g, '-');
 
-            const action =
-                getAction(row.category);
-
             const screenshotHtml =
                 row.screenshotPath
                     ? this.createScreenshotHtml(
@@ -402,40 +399,6 @@ export default class FeeDiscrepancyReporter
                                 )
                                 : '—'
                         }
-                    </td>
-
-                    <td>
-                        ${
-                            comparison?.gst
-                                ? escapeHtml(
-                                    comparison.gst
-                                )
-                                : '—'
-                        }
-                    </td>
-
-                    <td>
-                        ${
-                            comparison?.startDate
-                                ? escapeHtml(
-                                    comparison.startDate
-                                )
-                                : '—'
-                        }
-                    </td>
-
-                    <td>
-                        ${
-                            comparison?.batchType
-                                ? escapeHtml(
-                                    comparison.batchType
-                                )
-                                : '—'
-                        }
-                    </td>
-
-                    <td>
-                        ${escapeHtml(action)}
                     </td>
 
                     <td class="duration">
@@ -507,14 +470,6 @@ export default class FeeDiscrepancyReporter
                                     <th>Expected Fee</th>
 
                                     <th>Displayed Fee</th>
-
-                                    <th>GST</th>
-
-                                    <th>Start Date</th>
-
-                                    <th>Batch Type</th>
-
-                                    <th>Action</th>
 
                                     <th>Duration</th>
 
@@ -771,6 +726,8 @@ export default class FeeDiscrepancyReporter
             vertical-align: top;
 
             font-size: 13px;
+
+            text-align: left;
         }
 
         tr:hover {
@@ -853,6 +810,8 @@ export default class FeeDiscrepancyReporter
             white-space: normal;
 
             word-break: break-word;
+
+            text-align: left;
         }
 
         .error-message {
@@ -868,6 +827,10 @@ export default class FeeDiscrepancyReporter
             border-radius: 5px;
 
             padding: 10px;
+
+            text-align: left;
+
+            margin: 0;
         }
 
         .screenshot {
@@ -928,7 +891,7 @@ export default class FeeDiscrepancyReporter
         </h1>
 
         <p>
-            Stakeholder-focused execution summary
+            Execution summary
         </p>
 
         <p>
@@ -1003,13 +966,13 @@ export default class FeeDiscrepancyReporter
     </div>
 
     ${renderSection(
-        '⚠ Fee Discrepancies — Product / Content Action Required',
+        '⚠ Fee Discrepancies',
         discrepancies,
         'discrepancy'
     )}
 
     ${renderSection(
-        '🛠 Automation Defects — QA / Automation Action Required',
+        '🛠 Automation Defects',
         defects,
         'defect'
     )}
@@ -1106,6 +1069,30 @@ function cleanTestTitle(
 }
 
 /**
+ * Strips ANSI escape/color codes (e.g. the raw terminal codes
+ * Playwright/Jest embed in diff output such as "\x1b[2m", "\x1b[32m")
+ * from an error message.
+ *
+ * Without this, those codes render as garbled boxes/characters
+ * once the message is placed in HTML, since HTML has no concept
+ * of terminal color codes.
+ */
+function stripAnsiCodes(
+    input: string
+): string {
+
+    // Matches CSI-style ANSI escape sequences: ESC [ ... letter
+    // eslint-disable-next-line no-control-regex
+    const ansiPattern =
+        /[\u001B\u009B][[\]()#;?]*(?:[0-9]{1,4}(?:;[0-9]{0,4})*)?[0-9A-ORZcf-nqry=><]/g;
+
+    return input.replace(
+        ansiPattern,
+        ''
+    );
+}
+
+/**
  * Cleans Playwright error messages so the stakeholder
  * report focuses on the useful failure information.
  */
@@ -1136,6 +1123,50 @@ function cleanErrorMessage(
     }
 
     /*
+     * Strip ANSI escape/color codes — otherwise the diff
+     * output (e.g. "Expected: ... Received: ...") renders
+     * as garbled box characters in the HTML report.
+     */
+
+    cleaned =
+        stripAnsiCodes(cleaned);
+
+    /*
+     * Drop everything from Jest's raw "expect(received).toBe(expected)"
+     * assertion block onward. The custom "Fee mismatch | Program: ... |
+     * Expected: ... | Displayed: ..." line above it already carries all
+     * the information a stakeholder needs — the raw expect()/diff block
+     * is internal test-framework noise, not useful for that audience.
+     */
+
+    const expectIndex =
+        cleaned.indexOf('expect(');
+
+    if (expectIndex !== -1) {
+
+        cleaned =
+            cleaned.substring(
+                0,
+                expectIndex
+            );
+    }
+
+    /*
+     * Normalize indentation.
+     *
+     * Playwright/Jest diff output often carries inconsistent
+     * leading whitespace per line (used for terminal alignment,
+     * meaningless in HTML). Trim each line individually so the
+     * Details column renders flush-left instead of appearing
+     * randomly indented.
+     */
+
+    cleaned = cleaned
+        .split('\n')
+        .map(line => line.trim())
+        .join('\n');
+
+    /*
      * Remove excessive blank lines.
      */
 
@@ -1150,37 +1181,6 @@ function cleanErrorMessage(
      */
 
     return cleaned.trim();
-}
-
-/**
- * Determines who should take action.
- */
-function getAction(
-    category: ReportRow['category']
-): string {
-
-    switch (category) {
-
-        case 'Fee Discrepancy':
-
-            return 'Product / Content Team';
-
-        case 'Automation Defect':
-
-            return 'QA / Automation Team';
-
-        case 'Passed':
-
-            return 'No Action';
-
-        case 'Skipped':
-
-            return 'Review if required';
-
-        default:
-
-            return 'Review';
-    }
 }
 
 /**

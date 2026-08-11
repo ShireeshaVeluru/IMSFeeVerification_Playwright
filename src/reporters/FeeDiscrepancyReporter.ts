@@ -410,13 +410,7 @@ export default class FeeDiscrepancyReporter
                     <td class="details">
                         ${
                             row.errorMessage
-                                ? `
-                                    <div class="error-message">
-                                        ${escapeHtml(
-                                            row.errorMessage
-                                        )}
-                                    </div>
-                                  `
+                                ? `<div class="error-message">${escapeHtml(row.errorMessage)}</div>`
                                 : '—'
                         }
                     </td>
@@ -891,7 +885,7 @@ export default class FeeDiscrepancyReporter
         </h1>
 
         <p>
-            Execution summary
+            Stakeholder-focused execution summary
         </p>
 
         <p>
